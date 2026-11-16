@@ -21,7 +21,7 @@
 
   <script>
     const ROOM_ID = "joyax-live-voice-2026";
-    let localStream, peer, currentCall, ws, isUserEnded = false, activeWsUrl = "";
+    let localStream, peer, currentCall, ws, pingInterval, isUserEnded = false, activeWsUrl = "";
 
     async function startVoice() {
       const status = document.getElementById('status');
@@ -32,7 +32,7 @@
         isUserEnded = false;
 
         const bgAudio = document.getElementById('bgKeepAlive');
-        bgAudio.volume = 0.01;
+        bgAudio.volume = 0.05;
         await bgAudio.play();
 
         if ('mediaSession' in navigator) {
@@ -55,9 +55,8 @@
         document.getElementById('endBtn').style.display = 'block';
         status.innerText = "Fetching Live Server...";
 
-        // सीधे अपने ही सर्वर की लोकल url.txt फाइल से लिंक उठाना (कभी Failed to fetch नहीं होगा)
         const res = await fetch('url.txt?nocache=' + Date.now());
-        if (!res.ok) throw new Error("url.txt file not found");
+        if (!res.ok) throw new Error("url.txt not found");
         const rawUrl = (await res.text()).trim();
 
         if (!rawUrl.startsWith('https://')) {
@@ -84,6 +83,15 @@
       ws.onopen = () => {
         status.style.color = "#00e676";
         status.innerText = "Connected! Background Active";
+        
+        // हर 10 सेकंड में हार्टबीट पिंग भेजना ताकि बैकग्राउंड में कनेक्शन न कटे
+        clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN && !isUserEnded) {
+            ws.send('ping');
+          }
+        }, 10000);
+
         const recorder = new MediaRecorder(localStream);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0 && ws.readyState === WebSocket.OPEN && !isUserEnded) {
@@ -98,6 +106,7 @@
       };
 
       ws.onclose = () => {
+        clearInterval(pingInterval);
         if (!isUserEnded) {
           setTimeout(() => connectBridge(wsUrl), 1500);
         }
@@ -141,6 +150,7 @@
 
     function stopVoice() {
       isUserEnded = true;
+      clearInterval(pingInterval);
       document.getElementById('bgKeepAlive').pause();
       if (currentCall) currentCall.close();
       if (peer) peer.destroy();
