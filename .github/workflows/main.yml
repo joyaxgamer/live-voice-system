@@ -35,25 +35,13 @@ jobs:
           git commit -m "Update live tunnel URL" || true
           git push
 
-      - name: Run 24/7 YouTube Stream (5.5 Hours)
+      - name: Run 24/7 YouTube Stream
         run: |
-          timeout 19800 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 \
-            -re -stream_loop -1 -i lovee_audio.mp3 \
-            -f mp3 -thread_queue_size 1024 -i "http://localhost:8080/voice.mp3" \
-            -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" \
-            -map 0:v -map "[out]" \
-            -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 \
-            -c:a aac -b:a 128k -ar 44100 \
-            -f flv "rtmp://://youtube.com" || true
+          RTMP_URL="rtmp://a.rtmp.youtube.com/live2"
+          STREAM_KEY="ay8r-px8b-ammh-qq0j-24qd"
+          timeout 19800 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 -re -stream_loop -1 -i lovee_audio.mp3 -f mp3 -thread_queue_size 1024 -i "http://localhost:8080/voice.mp3" -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" -map 0:v -map "[out]" -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 -c:a aac -b:a 128k -ar 44100 -f flv "$RTMP_URL/$STREAM_KEY" || true
 
       - name: Auto-Restart Next 24/7 Session
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO_NAME: ${{ github.repository }}
         run: |
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            "https://github.com" \
-            -d '{"ref":"main"}'
+          curl -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://github.com" -d '{"ref":"main"}'
