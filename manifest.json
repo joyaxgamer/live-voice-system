@@ -1,0 +1,8 @@
+{
+  "name": "24/7 Live Voice",
+  "short_name": "LiveVoice",
+  "start_url": "/live-voice-system/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00e676"
+}
