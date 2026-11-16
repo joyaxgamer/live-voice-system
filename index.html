@@ -9,68 +9,85 @@
     .btn { padding: 22px 42px; font-size: 20px; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; }
     #joinBtn { background: #00e676; color: #000; }
     #endBtn { background: #ff1744; color: #fff; display: none; margin-top: 20px; }
-    #status { margin-top: 20px; color: #aaa; font-size: 16px; padding: 0 20px; }
+    #status { margin-top: 25px; color: #00e676; font-size: 18px; padding: 0 20px; font-weight: bold; }
   </style>
 </head>
 <body>
-  <button id="joinBtn" class="btn">TAP TO JOIN VOICE</button>
-  <button id="endBtn" class="btn">DISCONNECT CALL</button>
-  <div id="status">Tap button to connect instantly</div>
+  <button id="joinBtn" class="btn" onclick="startVoice()">TAP TO JOIN VOICE</button>
+  <button id="endBtn" class="btn" onclick="stopVoice()">DISCONNECT CALL</button>
+  <div id="status">Ready - Tap Button</div>
   <audio id="remoteAudio" autoplay></audio>
-  <audio id="wakeLockAudio" loop></audio>
 
   <script>
     const ROOM_ID = "joyax-live-voice-2026";
     let localStream, peer, currentCall, ws, isUserEnded = false;
 
-    document.getElementById('joinBtn').onclick = async () => {
-      isUserEnded = false;
-      document.getElementById('joinBtn').style.display = 'none';
-      document.getElementById('endBtn').style.display = 'block';
-      document.getElementById('status').innerText = "Connecting Mic...";
+    async function startVoice() {
+      const status = document.getElementById('status');
+      status.innerText = "Button Clicked! Checking Mic...";
+      
+      try {
+        isUserEnded = false;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          status.innerText = "Error: Browser does not support Mic";
+          return;
+        }
 
-      const ctx = new AudioContext();
-      const dest = ctx.createMediaStreamDestination();
-      document.getElementById('wakeLockAudio').srcObject = dest.stream;
-      document.getElementById('wakeLockAudio').play();
-      if ('wakeLock' in navigator) { try { await navigator.wakeLock.request('screen'); } catch(e){} }
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        document.getElementById('joinBtn').style.display = 'none';
+        document.getElementById('endBtn').style.display = 'block';
+        status.innerText = "Mic Connected! Fetching Server...";
 
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const res = await fetch('url.txt?t=' + Date.now());
+        const rawUrl = (await res.text()).trim();
+        
+        if (!rawUrl.startsWith('https://')) {
+          status.innerText = "Error: url.txt has invalid link (" + rawUrl + ")";
+          return;
+        }
 
-      const res = await fetch('url.txt?t=' + Date.now());
-      const tunnelUrl = (await res.text()).trim().replace('https://', 'wss://');
+        const wsUrl = rawUrl.replace('https://', 'wss://');
+        connectBridge(wsUrl);
+        connectPeer();
 
-      connectToYouTubeBridge(tunnelUrl);
-      startPeerConnection();
-    };
-
-    function connectToYouTubeBridge(wsUrl) {
-      if (!wsUrl.startsWith('wss://')) return;
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        const recorder = new MediaRecorder(localStream, { mimeType: 'audio/webm;codecs=opus' });
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN && !isUserEnded) ws.send(e.data);
-        };
-        recorder.start(250);
-      };
-      ws.onclose = () => { if (!isUserEnded) setTimeout(() => connectToYouTubeBridge(wsUrl), 2000); };
+      } catch (err) {
+        status.style.color = "#ff5252";
+        status.innerText = "Failed: " + err.name + " - " + err.message;
+      }
     }
 
-    function startPeerConnection() {
-      peer = new Peer(ROOM_ID);
-      peer.on('open', () => { document.getElementById('status').innerText = "Waiting for partner... (Mic Live)"; });
+    function connectBridge(wsUrl) {
+      const status = document.getElementById('status');
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        status.innerText = "Connected to YouTube Live! Waiting for Partner...";
+        const recorder = new MediaRecorder(localStream);
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN && !isUserEnded) {
+            ws.send(e.data);
+          }
+        };
+        recorder.start(300);
+      };
+      ws.onerror = () => {
+        status.innerText = "Bridge Error: Server not reachable";
+      };
+    }
 
+    function connectPeer() {
+      const status = document.getElementById('status');
+      peer = new Peer(ROOM_ID);
+      peer.on('open', () => {
+        status.innerText = "Room Active! Voice Going Live...";
+      });
       peer.on('call', (call) => {
         currentCall = call;
         call.answer(localStream);
         call.on('stream', (stream) => {
           document.getElementById('remoteAudio').srcObject = stream;
-          document.getElementById('status').innerText = "Connected! Voice Live";
+          status.innerText = "Talking Live with Partner!";
         });
-        call.on('close', () => { if (!isUserEnded) document.getElementById('status').innerText = "Partner Disconnected"; });
       });
-
       peer.on('error', (err) => {
         if (err.type === 'unavailable-id') {
           const guest = new Peer();
@@ -78,10 +95,23 @@
             currentCall = guest.call(ROOM_ID, localStream);
             currentCall.on('stream', (stream) => {
               document.getElementById('remoteAudio').srcObject = stream;
-              document.getElementById('status').innerText = "Connected! Voice Live";
+              status.innerText = "Talking Live with Partner!";
             });
-            currentCall.on('close', () => { if (!isUserEnded) document.getElementById('status').innerText = "Host Disconnected"; });
           });
         }
       });
     }
+
+    function stopVoice() {
+      isUserEnded = true;
+      if (currentCall) currentCall.close();
+      if (peer) peer.destroy();
+      if (ws) ws.close();
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      document.getElementById('status').innerText = "Disconnected";
+      document.getElementById('endBtn').style.display = 'none';
+      document.getElementById('joinBtn').style.display = 'block';
+    }
+  </script>
+</body>
+</html>
