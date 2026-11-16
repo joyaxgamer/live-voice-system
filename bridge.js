@@ -8,37 +8,43 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// एक ऐसा पाइप जो बिना रुके तुरंत डेटा पास करेगा
-const audioStream = new PassThrough();
+const masterAudio = new PassThrough();
 
-// हर 100ms में खाली डेटा भेजना ताकि HTTP कनेक्शन कभी न अटके
-setInterval(() => {
-  if (audioStream.readableLength === 0) {
-    audioStream.write(Buffer.alloc(1024));
+// यह असली साइलेंट MP3 फ्रेम्स लगातार पैदा करेगा ताकि YouTube FFmpeg कभी न रुके
+const silenceGen = spawn('ffmpeg', [
+  '-re', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+  '-f', 'mp3', '-ab', '128k', '-ar', '44100', 'pipe:1'
+]);
+
+let isTalking = false;
+
+silenceGen.stdout.on('data', (chunk) => {
+  if (!isTalking) {
+    masterAudio.write(chunk);
   }
-}, 100);
+});
 
 app.get('/voice.mp3', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'audio/mpeg',
-    'Transfer-Encoding': 'chunked'
+    'Connection': 'keep-alive'
   });
-  audioStream.pipe(res, { end: false });
+  masterAudio.pipe(res, { end: false });
 });
 
 wss.on('connection', (ws) => {
-  // जब फोन से आवाज आएगी, तो यह FFmpeg उसे MP3 बनाकर मुख्य पाइप में डालेगा
-  const decoder = spawn('ffmpeg', [
+  const voiceDecoder = spawn('ffmpeg', [
     '-f', 'webm', '-i', 'pipe:0',
     '-f', 'mp3', '-ab', '128k', '-ar', '44100', '-ac', '2', 'pipe:1'
   ]);
 
-  decoder.stdout.on('data', (chunk) => {
-    audioStream.write(chunk);
+  voiceDecoder.stdout.on('data', (chunk) => {
+    isTalking = true;
+    masterAudio.write(chunk);
   });
 
   ws.on('message', (data) => {
-    if (decoder.stdin.writable) decoder.stdin.write(data);
+    if (voiceDecoder.stdin.writable) voiceDecoder.stdin.write(data);
     wss.clients.forEach((client) => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(data);
@@ -47,8 +53,9 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    decoder.kill();
+    isTalking = false;
+    voiceDecoder.kill();
   });
 });
 
-server.listen(8080, () => console.log('Non-blocking Voice Bridge Ready'));
+server.listen(8080, () => console.log('Master Audio Bridge Running'));
