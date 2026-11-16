@@ -6,20 +6,20 @@ const { PassThrough } = require('stream');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, perMessageDeflate: false });
 
 const masterAudio = new PassThrough();
 
-// यह असली साइलेंट MP3 फ्रेम्स लगातार पैदा करेगा ताकि YouTube FFmpeg कभी न रुके
+// लगातार 24/7 साइलेंट ऑडियो जनरेट करना ताकि FFmpeg कभी न रुके
 const silenceGen = spawn('ffmpeg', [
   '-re', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
   '-f', 'mp3', '-ab', '128k', '-ar', '44100', 'pipe:1'
 ]);
 
-let isTalking = false;
+let activeTalkers = 0;
 
 silenceGen.stdout.on('data', (chunk) => {
-  if (!isTalking) {
+  if (activeTalkers === 0) {
     masterAudio.write(chunk);
   }
 });
@@ -27,24 +27,30 @@ silenceGen.stdout.on('data', (chunk) => {
 app.get('/voice.mp3', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'audio/mpeg',
+    'Cache-Control': 'no-cache',
     'Connection': 'keep-alive'
   });
   masterAudio.pipe(res, { end: false });
 });
 
 wss.on('connection', (ws) => {
-  const voiceDecoder = spawn('ffmpeg', [
+  activeTalkers++;
+  const decoder = spawn('ffmpeg', [
     '-f', 'webm', '-i', 'pipe:0',
     '-f', 'mp3', '-ab', '128k', '-ar', '44100', '-ac', '2', 'pipe:1'
   ]);
 
-  voiceDecoder.stdout.on('data', (chunk) => {
-    isTalking = true;
+  decoder.stdout.on('data', (chunk) => {
     masterAudio.write(chunk);
   });
 
+  decoder.stderr.on('data', () => {});
+
   ws.on('message', (data) => {
-    if (voiceDecoder.stdin.writable) voiceDecoder.stdin.write(data);
+    if (data.toString() === 'ping') return; // कनेक्शन जिंदा रखने के लिए
+    if (decoder.stdin.writable) {
+      decoder.stdin.write(data);
+    }
     wss.clients.forEach((client) => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(data);
@@ -52,10 +58,13 @@ wss.on('connection', (ws) => {
     });
   });
 
-  ws.on('close', () => {
-    isTalking = false;
-    voiceDecoder.kill();
-  });
+  const cleanup = () => {
+    activeTalkers = Math.max(0, activeTalkers - 1);
+    try { decoder.kill('SIGKILL'); } catch (e) {}
+  };
+
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
 });
 
-server.listen(8080, () => console.log('Master Audio Bridge Running'));
+server.listen(8080, '0.0.0.0', () => console.log('Stable 24/7 Voice Bridge Ready'));
