@@ -3,6 +3,7 @@
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>24/7 Live Voice Chat</title>
+  <link rel="manifest" href="manifest.json">
   <script src="https://unpkg.com"></script>
   <style>
     body { background: #0a0a0a; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; text-align: center; }
@@ -21,7 +22,7 @@
 
   <script>
     const ROOM_ID = "joyax-live-voice-2026";
-    let localStream, peer, currentCall, ws, pingInterval, isUserEnded = false, activeWsUrl = "";
+    let localStream, peer, currentCall, ws, recorder, watchdogTimer, isUserEnded = false, activeWsUrl = "";
 
     async function startVoice() {
       const status = document.getElementById('status');
@@ -56,7 +57,6 @@
         status.innerText = "Fetching Live Server...";
 
         const res = await fetch('url.txt?nocache=' + Date.now());
-        if (!res.ok) throw new Error("url.txt not found");
         const rawUrl = (await res.text()).trim();
 
         if (!rawUrl.startsWith('https://')) {
@@ -68,6 +68,18 @@
         activeWsUrl = rawUrl.replace('https://', 'wss://');
         connectBridge(activeWsUrl);
         connectPeer();
+
+        // हर 3 सेकंड में चेक करने वाला वॉचडॉग ताकि बैकग्राउंड में भी कनेक्शन न टूटे
+        clearInterval(watchdogTimer);
+        watchdogTimer = setInterval(() => {
+          if (isUserEnded) return;
+          if (bgAudio.paused) bgAudio.play().catch(() => {});
+          if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+            connectBridge(activeWsUrl);
+          } else if (ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
+        }, 3000);
 
       } catch (err) {
         status.style.color = "#ff5252";
@@ -83,16 +95,10 @@
       ws.onopen = () => {
         status.style.color = "#00e676";
         status.innerText = "Connected! Background Active";
-        
-        // हर 10 सेकंड में हार्टबीट पिंग भेजना ताकि बैकग्राउंड में कनेक्शन न कटे
-        clearInterval(pingInterval);
-        pingInterval = setInterval(() => {
-          if (ws && ws.readyState === WebSocket.OPEN && !isUserEnded) {
-            ws.send('ping');
-          }
-        }, 10000);
-
-        const recorder = new MediaRecorder(localStream);
+        if (recorder && recorder.state !== 'inactive') {
+          try { recorder.stop(); } catch(e) {}
+        }
+        recorder = new MediaRecorder(localStream);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0 && ws.readyState === WebSocket.OPEN && !isUserEnded) {
             ws.send(e.data);
@@ -101,14 +107,9 @@
         recorder.start(300);
       };
 
-      ws.onerror = () => {
-        if (!isUserEnded) status.innerText = "Reconnecting in background...";
-      };
-
       ws.onclose = () => {
-        clearInterval(pingInterval);
         if (!isUserEnded) {
-          setTimeout(() => connectBridge(wsUrl), 1500);
+          setTimeout(() => connectBridge(wsUrl), 1000);
         }
       };
     }
@@ -138,20 +139,11 @@
       });
     }
 
-    document.addEventListener('visibilitychange', () => {
-      if (!isUserEnded) {
-        const bgAudio = document.getElementById('bgKeepAlive');
-        if (bgAudio.paused) bgAudio.play().catch(() => {});
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          if (activeWsUrl) connectBridge(activeWsUrl);
-        }
-      }
-    });
-
     function stopVoice() {
       isUserEnded = true;
-      clearInterval(pingInterval);
+      clearInterval(watchdogTimer);
       document.getElementById('bgKeepAlive').pause();
+      if (recorder && recorder.state !== 'inactive') try { recorder.stop(); } catch(e) {}
       if (currentCall) currentCall.close();
       if (peer) peer.destroy();
       if (ws) ws.close();
