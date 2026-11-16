@@ -37,7 +37,7 @@ jobs:
 
       - name: Run 24/7 YouTube Stream (5.5 Hours)
         run: |
-          timeout 19800 ffmpeg -re -loop 1 -i lovee_video.mp4 \
+          timeout 19800 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 \
             -re -stream_loop -1 -i lovee_audio.mp3 \
             -f mp3 -thread_queue_size 1024 -i "http://localhost:8080/voice.mp3" \
             -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" \
