@@ -36,8 +36,6 @@ jobs:
           git push
 
       - name: Run 24/7 YouTube Stream (5.5 Hours)
-        env:
-          STREAM_KEY: ${{ secrets.YT_STREAM_KEY }}
         run: |
           timeout 19800 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 \
             -re -stream_loop -1 -i lovee_audio.mp3 \
