@@ -17,7 +17,6 @@
   <button id="endBtn" class="btn" onclick="stopVoice()">DISCONNECT CALL</button>
   <div id="status">Ready - Tap Button</div>
   <audio id="remoteAudio" autoplay playsinline></audio>
-  <!-- असली साइलेंट WAV डेटा ताकि Android Chrome बैकग्राउंड में टैब को फ्रीज न करे -->
   <audio id="bgKeepAlive" loop playsinline src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"></audio>
 
   <script>
@@ -32,7 +31,6 @@
       try {
         isUserEnded = false;
 
-        // 1. असली बैकग्राउंड ऑडियो और लॉक-स्क्रीन मीडिया नोटिफिकेशन चालू करना
         const bgAudio = document.getElementById('bgKeepAlive');
         bgAudio.volume = 0.01;
         await bgAudio.play();
@@ -57,9 +55,10 @@
         document.getElementById('endBtn').style.display = 'block';
         status.innerText = "Fetching Live Server...";
 
-        const apiRes = await fetch('https://github.com' + Date.now());
-        const apiData = await apiRes.json();
-        const rawUrl = atob(apiData.content).trim();
+        // सीधे अपने ही सर्वर की लोकल url.txt फाइल से लिंक उठाना (कभी Failed to fetch नहीं होगा)
+        const res = await fetch('url.txt?nocache=' + Date.now());
+        if (!res.ok) throw new Error("url.txt file not found");
+        const rawUrl = (await res.text()).trim();
 
         if (!rawUrl.startsWith('https://')) {
           status.style.color = "#ff5252";
@@ -130,7 +129,6 @@
       });
     }
 
-    // जैसे ही फोन बैकग्राउंड में जाए या वापस आए, ऑडियो और कनेक्शन को तुरंत एक्टिव रखना
     document.addEventListener('visibilitychange', () => {
       if (!isUserEnded) {
         const bgAudio = document.getElementById('bgKeepAlive');
