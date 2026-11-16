@@ -17,15 +17,13 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg nodejs npm
-          npm install ws express
-          wget -q https://github.com -O cloudflared
-          chmod +x cloudflared
+          npm install ws express cloudflared
 
-      - name: Start Bridge & Auto-Update URL
+      - name: Run 24/7 Bridge, Tunnel & YouTube Stream
         run: |
           node bridge.js &
           sleep 3
-          ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080 > tunnel.log 2>&1 &
+          npx cloudflared tunnel --url http://127.0.0.1:8080 > tunnel.log 2>&1 &
           for i in {1..20}; do
             TUNNEL_URL=$(grep -aoE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" tunnel.log | head -n 1)
             if [ -n "$TUNNEL_URL" ]; then
@@ -34,7 +32,6 @@ jobs:
             sleep 2
           done
           echo "Found URL: $TUNNEL_URL"
-          cat tunnel.log
           echo "$TUNNEL_URL" > url.txt
           git config user.name "AutoBot"
           git config user.email "bot@github.com"
@@ -42,8 +39,6 @@ jobs:
           git commit -m "Update live tunnel URL" || true
           git push
 
-      - name: Run 24/7 YouTube Stream
-        run: |
           timeout 19800 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 -re -stream_loop -1 -i lovee_audio.mp3 -f mp3 -thread_queue_size 1024 -i "http://127.0.0" -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" -map 0:v -map "[out]" -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 -c:a aac -b:a 128k -ar 44100 -f flv "rtmp://://youtube.com" || true
 
       - name: Auto-Restart Next 24/7 Session
