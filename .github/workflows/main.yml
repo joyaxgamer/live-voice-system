@@ -39,7 +39,7 @@ jobs:
         run: |
           timeout 19800 ffmpeg -re -loop 1 -i lovee_video.mp4 \
             -re -stream_loop -1 -i lovee_audio.mp3 \
-            -thread_queue_size 1024 -i "http://localhost:8080/voice.mp3" \
+            -f mp3 -thread_queue_size 1024 -i "http://localhost:8080/voice.mp3" \
             -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" \
             -map 0:v -map "[out]" \
             -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 \
