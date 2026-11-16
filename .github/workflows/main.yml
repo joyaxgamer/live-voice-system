@@ -24,8 +24,9 @@ jobs:
       - name: Start Bridge & Auto-Update URL
         run: |
           node bridge.js &
+          sleep 3
           ./cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
-          sleep 10
+          sleep 8
           TUNNEL_URL=$(grep -o 'https://[-a-z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1)
           echo "$TUNNEL_URL" > url.txt
           git config user.name "AutoBot"
@@ -36,7 +37,7 @@ jobs:
 
       - name: Run 24/7 YouTube Stream (5.5 Hours)
         run: |
-          timeout 19800 ffmpeg -re -stream_loop -1 -i lovee_video.mp4 \
+          timeout 19800 ffmpeg -re -loop 1 -i lovee_video.mp4 \
             -re -stream_loop -1 -i lovee_audio.mp3 \
             -thread_queue_size 1024 -i "http://localhost:8080/voice.mp3" \
             -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" \
