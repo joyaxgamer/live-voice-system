@@ -7,8 +7,9 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// -re लगाने से यह बिना रुके लगातार साइलेंट ऑडियो आउटपुट देता रहेगा
 const ffmpeg = spawn('ffmpeg', [
-  '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+  '-re', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
   '-f', 'webm', '-i', 'pipe:0',
   '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first:normalize=0',
   '-f', 'mp3', '-ab', '128k', '-ar', '44100', 'pipe:1'
