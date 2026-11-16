@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 */5 * * *'
 
+concurrency:
+  group: single-live-stream
+  cancel-in-progress: false
+
 permissions:
   contents: write
   actions: write
@@ -59,7 +63,7 @@ jobs:
           done
 
       - name: Auto-Restart Next 24/7 Session
-        if: always()
+        if: success()
         run: |
           API_HOST="api.github.com"
           curl -X POST \
