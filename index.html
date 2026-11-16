@@ -9,58 +9,82 @@
     .btn { padding: 22px 42px; font-size: 20px; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; }
     #joinBtn { background: #00e676; color: #000; }
     #endBtn { background: #ff1744; color: #fff; display: none; margin-top: 20px; }
-    #status { margin-top: 25px; color: #00e676; font-size: 18px; padding: 0 20px; font-weight: bold; }
+    #status { margin-top: 25px; color: #00e676; font-size: 16px; padding: 0 20px; font-weight: bold; }
   </style>
 </head>
 <body>
   <button id="joinBtn" class="btn" onclick="startVoice()">TAP TO JOIN VOICE</button>
   <button id="endBtn" class="btn" onclick="stopVoice()">DISCONNECT CALL</button>
   <div id="status">Ready - Tap Button</div>
-  <audio id="remoteAudio" autoplay></audio>
+  <audio id="remoteAudio" autoplay playsinline></audio>
+  <!-- असली साइलेंट WAV डेटा ताकि Android Chrome बैकग्राउंड में टैब को फ्रीज न करे -->
+  <audio id="bgKeepAlive" loop playsinline src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"></audio>
 
   <script>
     const ROOM_ID = "joyax-live-voice-2026";
-    let localStream, peer, currentCall, ws, isUserEnded = false;
+    let localStream, peer, currentCall, ws, isUserEnded = false, activeWsUrl = "";
 
     async function startVoice() {
       const status = document.getElementById('status');
-      status.innerText = "Button Clicked! Checking Mic...";
+      status.style.color = "#00e676";
+      status.innerText = "Connecting Mic...";
       
       try {
         isUserEnded = false;
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          status.innerText = "Error: Browser does not support Mic";
-          return;
+
+        // 1. असली बैकग्राउंड ऑडियो और लॉक-स्क्रीन मीडिया नोटिफिकेशन चालू करना
+        const bgAudio = document.getElementById('bgKeepAlive');
+        bgAudio.volume = 0.01;
+        await bgAudio.play();
+
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Live Voice Call Active',
+            artist: '24/7 Live System'
+          });
+          navigator.mediaSession.playbackState = 'playing';
         }
 
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if ('wakeLock' in navigator) {
+          try { await navigator.wakeLock.request('screen'); } catch(e) {}
+        }
+
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+
         document.getElementById('joinBtn').style.display = 'none';
         document.getElementById('endBtn').style.display = 'block';
-        status.innerText = "Mic Connected! Fetching Server...";
+        status.innerText = "Fetching Live Server...";
 
-        const res = await fetch('url.txt?t=' + Date.now());
-        const rawUrl = (await res.text()).trim();
-        
+        const apiRes = await fetch('https://github.com' + Date.now());
+        const apiData = await apiRes.json();
+        const rawUrl = atob(apiData.content).trim();
+
         if (!rawUrl.startsWith('https://')) {
-          status.innerText = "Error: url.txt has invalid link (" + rawUrl + ")";
+          status.style.color = "#ff5252";
+          status.innerText = "Server starting, wait 30 sec & retry";
           return;
         }
 
-        const wsUrl = rawUrl.replace('https://', 'wss://');
-        connectBridge(wsUrl);
+        activeWsUrl = rawUrl.replace('https://', 'wss://');
+        connectBridge(activeWsUrl);
         connectPeer();
 
       } catch (err) {
         status.style.color = "#ff5252";
-        status.innerText = "Failed: " + err.name + " - " + err.message;
+        status.innerText = "Error: " + err.message;
       }
     }
 
     function connectBridge(wsUrl) {
+      if (isUserEnded) return;
       const status = document.getElementById('status');
       ws = new WebSocket(wsUrl);
+      
       ws.onopen = () => {
-        status.innerText = "Connected to YouTube Live! Waiting for Partner...";
+        status.style.color = "#00e676";
+        status.innerText = "Connected! Background Active";
         const recorder = new MediaRecorder(localStream);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0 && ws.readyState === WebSocket.OPEN && !isUserEnded) {
@@ -69,17 +93,21 @@
         };
         recorder.start(300);
       };
+
       ws.onerror = () => {
-        status.innerText = "Bridge Error: Server not reachable";
+        if (!isUserEnded) status.innerText = "Reconnecting in background...";
+      };
+
+      ws.onclose = () => {
+        if (!isUserEnded) {
+          setTimeout(() => connectBridge(wsUrl), 1500);
+        }
       };
     }
 
     function connectPeer() {
       const status = document.getElementById('status');
       peer = new Peer(ROOM_ID);
-      peer.on('open', () => {
-        status.innerText = "Room Active! Voice Going Live...";
-      });
       peer.on('call', (call) => {
         currentCall = call;
         call.answer(localStream);
@@ -102,8 +130,20 @@
       });
     }
 
+    // जैसे ही फोन बैकग्राउंड में जाए या वापस आए, ऑडियो और कनेक्शन को तुरंत एक्टिव रखना
+    document.addEventListener('visibilitychange', () => {
+      if (!isUserEnded) {
+        const bgAudio = document.getElementById('bgKeepAlive');
+        if (bgAudio.paused) bgAudio.play().catch(() => {});
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          if (activeWsUrl) connectBridge(activeWsUrl);
+        }
+      }
+    });
+
     function stopVoice() {
       isUserEnded = true;
+      document.getElementById('bgKeepAlive').pause();
       if (currentCall) currentCall.close();
       if (peer) peer.destroy();
       if (ws) ws.close();
