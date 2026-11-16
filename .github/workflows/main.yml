@@ -4,10 +4,6 @@ on:
   schedule:
     - cron: '0 */5 * * *'
 
-concurrency:
-  group: live-stream-group
-  cancel-in-progress: true
-
 permissions:
   contents: write
   actions: write
@@ -25,9 +21,9 @@ jobs:
 
       - name: Run 24/7 Bridge, Tunnel & YouTube Stream
         run: |
-          node bridge.js &
+          (while true; do node bridge.js; sleep 2; done) &
           sleep 3
-          npx cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          (while true; do npx cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1; sleep 3; done) &
           for i in {1..20}; do
             TUNNEL_URL=$(grep -aoE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" tunnel.log | head -n 1)
             if [ -n "$TUNNEL_URL" ]; then
@@ -43,15 +39,31 @@ jobs:
           git commit -m "Update live tunnel URL" || true
           git push
 
-          PORT_NUM="8080"                                                                             
+          PORT_NUM="8080"
           VOICE_SRC="http://localhost:${PORT_NUM}/voice.mp3"
           YT_HOST="a.rtmp.youtube.com"
           YT_KEY="ay8r-px8b-ammh-qq0j-24qd"
           YT_DEST="rtmp://${YT_HOST}/live2/${YT_KEY}"
-          timeout 19800 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 -re -stream_loop -1 -i lovee_audio.mp3 -f mp3 -thread_queue_size 1024 -i "$VOICE_SRC" -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" -map 0:v -map "[out]" -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 -c:a aac -b:a 128k -ar 44100 -f flv "$YT_DEST" || true
+          
+          START_TIME=$(date +%s)
+          while [ $(($(date +%s) - START_TIME)) -lt 19800 ]; do
+            ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 \
+              -re -stream_loop -1 -i lovee_audio.mp3 \
+              -f mp3 -thread_queue_size 1024 -i "$VOICE_SRC" \
+              -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" \
+              -map 0:v -map "[out]" \
+              -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 \
+              -c:a aac -b:a 128k -ar 44100 \
+              -f flv "$YT_DEST" || true
+            sleep 2
+          done
 
       - name: Auto-Restart Next 24/7 Session
         if: always()
         run: |
           API_HOST="api.github.com"
-          curl -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://${API_HOST}/repos/joyaxgamer/live-voice-system/actions/workflows/main.yml/dispatches" -d '{"ref":"main"}'
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://${API_HOST}/repos/joyaxgamer/live-voice-system/actions/workflows/main.yml/dispatches" \
+            -d '{"ref":"main"}'
