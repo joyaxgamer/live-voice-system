@@ -51,8 +51,8 @@ jobs:
           YT_DEST="rtmp://${H1}.${H2}/live2/${YT_KEY}"
           
           START_TIME=$(date +%s)
-          while [ $(($(date +%s) - START_TIME)) -lt 19800 ]; do
-            ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 \
+          while [ $(($(date +%s) - START_TIME)) -lt 19500 ]; do
+            timeout 19500 ffmpeg -re -f image2 -loop 1 -i lovee_video.mp4 \
               -re -stream_loop -1 -i lovee_audio.mp3 \
               -f mp3 -thread_queue_size 1024 -i "$VOICE_SRC" \
               -filter_complex "[1:a][2:a]sidechaincompress=threshold=0.005:ratio=20:attack=50:release=1000[bg];[2:a]volume=1.8[voice];[bg][voice]amix=inputs=2:duration=first:normalize=0[out]" \
@@ -64,7 +64,7 @@ jobs:
           done
 
       - name: Auto-Restart Next 24/7 Session
-        if: success()
+        if: always()
         run: |
           A1="api"
           A2="github.com"
